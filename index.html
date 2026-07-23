@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas Match-3 with Visual Effects</title>
+    <style>
+        :root {
+            --bg-color: #121214;
+            --panel-bg: #1e1e24;
+            --text-color: #e0e0e0;
+            --accent-color: #00adb5;
+            --danger-color: #ff2e63;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            user-select: none;
+        }
+
+        .game-container {
+            position: relative;
+            background-color: var(--panel-bg);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        header {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .score-box {
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        .score-value {
+            color: var(--accent-color);
+        }
+
+        button {
+            background-color: var(--accent-color);
+            color: #fff;
+            border: none;
+            padding: 8px 16px;
+            font-size: 0.9rem;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        button:hover {
+            background-color: #008c93;
+        }
+
+        button:active {
+            transform: scale(0.96);
+        }
+
+        .canvas-wrapper {
+            position: relative;
+        }
+
+        canvas {
+            border-radius: 8px;
+            background-color: #16161a;
+            cursor: pointer;
+            display: block;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .overlay h2 {
+            font-size: 2rem;
+            color: var(--danger-color);
+            margin: 0 0 10px 0;
+        }
+
+        .overlay p {
+            margin: 0 0 20px 0;
+            font-size: 1.1rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="game-container">
+    <header>
+        <div class="score-box">SCORE: <span id="score" class="score-value">0</span></div>
+        <button id="reset-btn">NEW GAME</button>
+    </header>
+
+    <div class="canvas-wrapper">
+        <canvas id="gameCanvas" width="480" height="480"></canvas>
+        <div id="game-over-overlay" class="overlay">
+            <h2>NO MORE MOVES!</h2>
+            <p>Game Over</p>
+            <button id="restart-btn">START NEW GAME</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const GRID_SIZE = 8;
+const TILE_TYPES = 6;
+const CELL_SIZE = 60;
+const CANVAS_SIZE = GRID_SIZE * CELL_SIZE;
+
+const COLORS = [
+    '#FF5722', // Orange
+    '#2196F3', // Blue
+    '#4CAF50', // Green
+    '#9C27B0', // Purple
+    '#FFEB3B', // Yellow
+    '#E91E63'  // Pink
+];
+
+const SPECIAL_NONE = 0;
+const SPECIAL_LINE = 1;
+const SPECIAL_BOMB = 2;
+const SPECIAL_COLORBOMB = 3;
+
+/**
+ * Particle System for Geometric Effects
+ */
+class GeometricParticle {
+    constructor(x, y, color, shapeType) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.shapeType = shapeType; // 'square', 'triangle', 'diamond'
+        this.size = Math.random() * 8 + 6;
+        this.vx = (Math.random() - 0.5) * 8;
+        this.vy = (Math.random() - 0.5) * 8;
+        this.rotation = Math.random() * Math.PI * 2;
+        this.vRot = (Math.random() - 0.5) * 0.2;
+        this.life = 1.0;
+        this.decay = Math.random() * 0.03 + 0.02;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy += 0.15; // Mild gravity
+        this.rotation += this.vRot;
+        this.life -= this.decay;
+    }
+
+    draw(ctx) {
+        if (this.life <= 0) return;
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation);
+        ctx.globalAlpha = Math.max(0, this.life);
+        ctx.fillStyle = this.color;
+
+        const s = this.size;
+        ctx.beginPath();
+        if (this.shapeType === 'square') {
+            ctx.fillRect(-s/2, -s/2, s, s);
+        } else if (this.shapeType === 'triangle') {
+            ctx.moveTo(0, -s/2);
+            ctx.lineTo(s/2, s/2);
+            ctx.lineTo(-s/2, s/2);
+            ctx.closePath();
+            ctx.fill();
+        } else if (this.shapeType === 'diamond') {
+            ctx.moveTo(0, -s/2);
+            ctx.lineTo(s/2, 0);
+            ctx.lineTo(0, s/2);
+            ctx.lineTo(-s/2, 0);
+            ctx.closePath();
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+}
+
+/**
+ * Ring Flash / Impact Wave System
+ */
+class ExpansionRing {
+    constructor(x, y, color, maxRadius = 40, isEllipse = false) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.radius = 4;
+        this.maxRadius = maxRadius;
+        this.life = 1.0;
+        this.isEllipse = isEllipse; // Ellipse ring used for drop impact
+    }
+
+    update() {
+        this.radius += 2.5;
+        this.life = 1.0 - (this.radius / this.maxRadius);
+    }
+
+    draw(ctx) {
+        if (this.life <= 0) return;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, this.life);
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+
+        if (this.isEllipse) {
+            ctx.ellipse(this.x, this.y, this.radius, this.radius * 0.3, 0, 0, Math.PI * 2);
+        } else {
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        }
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
+class Tile {
+    constructor(type, x, y, special = SPECIAL_NONE) {
+        this.type = type;
+        this.gridX = x;
+        this.gridY = y;
+        this.renderX = x * CELL_SIZE;
+        this.renderY = y * CELL_SIZE;
+        this.special = special;
+        this.isMatched = false;
+        
+        // Shake animation properties (Invalid Swap)
+        this.shakeOffsetX = 0;
+        this.shakeTimer = 0;
+
+        // Track when tile drops to trigger impact effect
+        this.wasAirborne = false;
+    }
+
+    update(onLandCallback) {
+        const targetX = this.gridX * CELL_SIZE;
+        const targetY = this.gridY * CELL_SIZE;
+        const speed = 0.25;
+
+        // Check airborne state for drop impact effect
+        if (Math.abs(this.renderY - targetY) > 5) {
+            this.wasAirborne = true;
+        }
+
+        this.renderX += (targetX - this.renderX) * speed;
+        this.renderY += (targetY - this.renderY) * speed;
+
+        if (Math.abs(this.renderX - targetX) < 0.5) this.renderX = targetX;
+        if (Math.abs(this.renderY - targetY) < 0.5) {
+            this.renderY = targetY;
+            if (this.wasAirborne) {
+                this.wasAirborne = false;
+                if (onLandCallback) onLandCallback(this.gridX, this.gridY, COLORS[this.type]);
+            }
+        }
+
+        // Handle invalid swap shake effect
+        if (this.shakeTimer > 0) {
+            this.shakeTimer--;
+            this.shakeOffsetX = Math.sin(this.shakeTimer * 0.8) * 6;
+        } else {
+            this.shakeOffsetX = 0;
+        }
+    }
+
+    triggerShake() {
+        this.shakeTimer = 15;
+    }
+
+    isAnimating() {
+        return this.renderX !== this.gridX * CELL_SIZE || 
+               this.renderY !== this.gridY * CELL_SIZE || 
+               this.shakeTimer > 0;
+    }
+}
+
+class Match3Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.scoreEl = document.getElementById('score');
+        this.overlay = document.getElementById('game-over-overlay');
+        
+        this.board = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+        this.score = 0;
+        
+        // Effects lists
+        this.particles = [];
+        this.rings = [];
+
+        this.isBusy = false;
+        this.isDragging = false;
+        this.dragStartTile = null;
+        this.dragCurrentPos = { x: 0, y: 0 };
+
+        this.initEvents();
+        this.loadStateOrNew();
+        this.loop();
+    }
+
+    initEvents() {
+        document.getElementById('reset-btn').addEventListener('click', () => this.startNewGame());
+        document.getElementById('restart-btn').addEventListener('click', () => {
+            this.overlay.classList.remove('active');
+            this.startNewGame();
+        });
+
+        const getPos = (e) => {
+            const rect = this.canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top
+            };
+        };
+
+        const handleStart = (e) => {
+            if (this.isBusy) return;
+            const pos = getPos(e);
+            const gx = Math.floor(pos.x / CELL_SIZE);
+            const gy = Math.floor(pos.y / CELL_SIZE);
+
+            if (gx >= 0 && gx < GRID_SIZE && gy >= 0 && gy < GRID_SIZE) {
+                this.isDragging = true;
+                this.dragStartTile = { x: gx, y: gy };
+                this.dragCurrentPos = pos;
+            }
+        };
+
+        const handleMove = (e) => {
+            if (!this.isDragging || this.isBusy) return;
+            const pos = getPos(e);
+            this.dragCurrentPos = pos;
+
+            const dx = pos.x - (this.dragStartTile.x + 0.5) * CELL_SIZE;
+            const dy = pos.y - (this.dragStartTile.y + 0.5) * CELL_SIZE;
+
+            if (Math.abs(dx) > CELL_SIZE * 0.4 || Math.abs(dy) > CELL_SIZE * 0.4) {
+                let targetX = this.dragStartTile.x;
+                let targetY = this.dragStartTile.y;
+
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    targetX += dx > 0 ? 1 : -1;
+                } else {
+                    targetY += dy > 0 ? 1 : -1;
+                }
+
+                this.isDragging = false;
+
+                if (targetX >= 0 && targetX < GRID_SIZE && targetY >= 0 && targetY < GRID_SIZE) {
+                    this.trySwap(this.dragStartTile.x, this.dragStartTile.y, targetX, targetY);
+                }
+            }
+        };
+
+        const handleEnd = () => { this.isDragging = false; };
+
+        this.canvas.addEventListener('mousedown', handleStart);
+        this.canvas.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', handleEnd);
+
+        this.canvas.addEventListener('touchstart', handleStart, { passive: true });
+        this.canvas.addEventListener('touchmove', handleMove, { passive: true });
+        window.addEventListener('touchend', handleEnd);
+    }
+
+    startNewGame() {
+        this.score = 0;
+        this.updateScore(0);
+        this.generateInitialBoard();
+        this.saveState();
+    }
+
+    generateInitialBoard() {
+        let hasMatches = true;
+        while (hasMatches) {
+            for (let x = 0; x < GRID_SIZE; x++) {
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    const type = Math.floor(Math.random() * TILE_TYPES);
+                    this.board[x][y] = new Tile(type, x, y);
+                }
+            }
+            hasMatches = this.findMatches().matches.length > 0;
+        }
+
+        if (!this.hasValidMoves()) {
+            this.generateInitialBoard();
+        }
+    }
+
+    async trySwap(x1, y1, x2, y2) {
+        this.isBusy = true;
+
+        const tile1 = this.board[x1][y1];
+        const tile2 = this.board[x2][y2];
+
+        this.swapBoardTiles(x1, y1, x2, y2);
+        await this.waitForAnimations();
+
+        const isColorBombSwap = tile1.special === SPECIAL_COLORBOMB || tile2.special === SPECIAL_COLORBOMB;
+        const matchResult = this.findMatches();
+
+        if (matchResult.matches.length > 0 || isColorBombSwap) {
+            // EFFECT 2: Valid Swap Ring Burst
+            const midX = (x1 + x2 + 1) * CELL_SIZE / 2;
+            const midY = (y1 + y2 + 1) * CELL_SIZE / 2;
+            this.rings.push(new ExpansionRing(midX, midY, '#00adb5', 60));
+
+            if (isColorBombSwap) {
+                this.handleColorBombSwap(tile1, tile2);
+            }
+            await this.processCascade();
+        } else {
+            // EFFECT 1: Invalid Swap Shake & Revert
+            tile1.triggerShake();
+            tile2.triggerShake();
+
+            this.swapBoardTiles(x1, y1, x2, y2);
+            await this.waitForAnimations();
+            this.isBusy = false;
+        }
+    }
+
+    swapBoardTiles(x1, y1, x2, y2) {
+        const temp = this.board[x1][y1];
+        this.board[x1][y1] = this.board[x2][y2];
+        this.board[x2][y2] = temp;
+
+        this.board[x1][y1].gridX = x1;
+        this.board[x1][y1].gridY = y1;
+        this.board[x2][y2].gridX = x2;
+        this.board[x2][y2].gridY = y2;
+    }
+
+    handleColorBombSwap(tile1, tile2) {
+        const colorBomb = tile1.special === SPECIAL_COLORBOMB ? tile1 : tile2;
+        const targetTile = tile1.special === SPECIAL_COLORBOMB ? tile2 : tile1;
+
+        colorBomb.isMatched = true;
+        const targetType = targetTile.type;
+
+        for (let x = 0; x < GRID_SIZE; x++) {
+            for (let y = 0; y < GRID_SIZE; y++) {
+                if (this.board[x][y] && this.board[x][y].type === targetType) {
+                    this.board[x][y].isMatched = true;
+                }
+            }
+        }
+    }
+
+    findMatches() {
+        const gridMatched = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(false));
+        
+        // Horizontal
+        for (let y = 0; y < GRID_SIZE; y++) {
+            for (let x = 0; x < GRID_SIZE - 2; x++) {
+                const t1 = this.board[x][y];
+                const t2 = this.board[x+1][y];
+                const t3 = this.board[x+2][y];
+                if (t1 && t2 && t3 && t1.type === t2.type && t2.type === t3.type && t1.special !== SPECIAL_COLORBOMB) {
+                    gridMatched[x][y] = true;
+                    gridMatched[x+1][y] = true;
+                    gridMatched[x+2][y] = true;
+                }
+            }
+        }
+
+        // Vertical
+        for (let x = 0; x < GRID_SIZE; x++) {
+            for (let y = 0; y < GRID_SIZE - 2; y++) {
+                const t1 = this.board[x][y];
+                const t2 = this.board[x][y+1];
+                const t3 = this.board[x][y+2];
+                if (t1 && t2 && t3 && t1.type === t2.type && t2.type === t3.type && t1.special !== SPECIAL_COLORBOMB) {
+                    gridMatched[x][y] = true;
+                    gridMatched[x][y+1] = true;
+                    gridMatched[x][y+2] = true;
+                }
+            }
+        }
+
+        const matchesList = [];
+        for (let x = 0; x < GRID_SIZE; x++) {
+            for (let y = 0; y < GRID_SIZE; y++) {
+                if (gridMatched[x][y]) {
+                    matchesList.push(this.board[x][y]);
+                }
+            }
+        }
+
+        return { matches: matchesList, gridMatched };
+    }
+
+    async processCascade() {
+        let cascadeCycle = true;
+
+        while (cascadeCycle) {
+            const { matches, gridMatched } = this.findMatches();
+            const activeMatches = matches.filter(t => !t.isMatched);
+            
+            for (let x = 0; x < GRID_SIZE; x++) {
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    if (this.board[x][y] && this.board[x][y].isMatched && !activeMatches.includes(this.board[x][y])) {
+                        activeMatches.push(this.board[x][y]);
+                    }
+                }
+            }
+
+            if (activeMatches.length === 0) {
+                cascadeCycle = false;
+                break;
+            }
+
+            activeMatches.forEach(t => t.isMatched = true);
+            this.expandSpecialEffects();
+            const createdSpecials = this.detectSpecialFormations(gridMatched);
+
+            let points = 0;
+            const shapes = ['square', 'triangle', 'diamond'];
+
+            // EFFECT 3: Tile Elimination Geometric Particles
+            for (let x = 0; x < GRID_SIZE; x++) {
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    const tile = this.board[x][y];
+                    if (tile && tile.isMatched) {
+                        points += 10;
+                        const centerX = (x + 0.5) * CELL_SIZE;
+                        const centerY = (y + 0.5) * CELL_SIZE;
+                        const color = COLORS[tile.type];
+
+                        // Spawn 8 geometric particles per eliminated tile
+                        for (let p = 0; p < 8; p++) {
+                            const randomShape = shapes[Math.floor(Math.random() * shapes.length)];
+                            this.particles.push(new GeometricParticle(centerX, centerY, color, randomShape));
+                        }
+                    }
+                }
+            }
+            this.updateScore(points);
+
+            // Remove tiles from grid
+            for (let x = 0; x < GRID_SIZE; x++) {
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    if (this.board[x][y] && this.board[x][y].isMatched) {
+                        const created = createdSpecials.find(s => s.x === x && s.y === y);
+                        if (created) {
+                            this.board[x][y].isMatched = false;
+                            this.board[x][y].special = created.special;
+                        } else {
+                            this.board[x][y] = null;
+                        }
+                    }
+                }
+            }
+
+            await this.waitForAnimations();
+
+            // EFFECT 4: Apply Gravity & Drop Impact Waves
+            this.applyGravity();
+            await this.waitForAnimations();
+        }
+
+        this.saveState();
+
+        if (!this.hasValidMoves()) {
+            this.showGameOver();
+        } else {
+            this.isBusy = false;
+        }
+    }
+
+    expandSpecialEffects() {
+        let additionalMatchesFound = true;
+        while (additionalMatchesFound) {
+            additionalMatchesFound = false;
+            for (let x = 0; x < GRID_SIZE; x++) {
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    const tile = this.board[x][y];
+                    if (tile && tile.isMatched) {
+                        if (tile.special === SPECIAL_LINE) {
+                            for (let i = 0; i < GRID_SIZE; i++) {
+                                if (this.board[i][y] && !this.board[i][y].isMatched) {
+                                    this.board[i][y].isMatched = true;
+                                    additionalMatchesFound = true;
+                                }
+                                if (this.board[x][i] && !this.board[x][i].isMatched) {
+                                    this.board[x][i].isMatched = true;
+                                    additionalMatchesFound = true;
+                                }
+                            }
+                        } else if (tile.special === SPECIAL_BOMB) {
+                            for (let dx = -1; dx <= 1; dx++) {
+                                for (let dy = -1; dy <= 1; dy++) {
+                                    const nx = x + dx;
+                                    const ny = y + dy;
+                                    if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                                        if (this.board[nx][ny] && !this.board[nx][ny].isMatched) {
+                                            this.board[nx][ny].isMatched = true;
+                                            additionalMatchesFound = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    detectSpecialFormations(gridMatched) {
+        const newSpecials = [];
+        for (let y = 0; y < GRID_SIZE; y++) {
+            let run = 0;
+            let startX = 0;
+            for (let x = 0; x < GRID_SIZE; x++) {
+                if (gridMatched[x][y]) {
+                    if (run === 0) startX = x;
+                    run++;
+                } else {
+                    if (run >= 4) {
+                        const midX = startX + Math.floor(run / 2);
+                        newSpecials.push({ x: midX, y, special: run >= 5 ? SPECIAL_COLORBOMB : SPECIAL_LINE });
+                    }
+                    run = 0;
+                }
+            }
+            if (run >= 4) {
+                const midX = startX + Math.floor(run / 2);
+                newSpecials.push({ x: midX, y, special: run >= 5 ? SPECIAL_COLORBOMB : SPECIAL_LINE });
+            }
+        }
+
+        for (let x = 0; x < GRID_SIZE; x++) {
+            let run = 0;
+            let startY = 0;
+            for (let y = 0; y < GRID_SIZE; y++) {
+                if (gridMatched[x][y]) {
+                    if (run === 0) startY = y;
+                    run++;
+                } else {
+                    if (run >= 4) {
+                        const midY = startY + Math.floor(run / 2);
+                        newSpecials.push({ x, y: midY, special: run >= 5 ? SPECIAL_COLORBOMB : SPECIAL_LINE });
+                    }
+                    run = 0;
+                }
+            }
+            if (run >= 4) {
+                const midY = startY + Math.floor(run / 2);
+                newSpecials.push({ x, y: midY, special: run >= 5 ? SPECIAL_COLORBOMB : SPECIAL_LINE });
+            }
+        }
+        return newSpecials;
+    }
+
+    applyGravity() {
+        for (let x = 0; x < GRID_SIZE; x++) {
+            let emptySpacesBelow = 0;
+            for (let y = GRID_SIZE - 1; y >= 0; y--) {
+                if (this.board[x][y] === null) {
+                    emptySpacesBelow++;
+                } else if (emptySpacesBelow > 0) {
+                    const tile = this.board[x][y];
+                    this.board[x][y + emptySpacesBelow] = tile;
+                    tile.gridY = y + emptySpacesBelow;
+                    this.board[x][y] = null;
+                }
+            }
+
+            for (let i = 0; i < emptySpacesBelow; i++) {
+                const targetY = emptySpacesBelow - 1 - i;
+                const type = Math.floor(Math.random() * TILE_TYPES);
+                const tile = new Tile(type, x, targetY);
+                tile.renderY = -((i + 1) * CELL_SIZE);
+                this.board[x][targetY] = tile;
+            }
+        }
+    }
+
+    hasValidMoves() {
+        for (let x = 0; x < GRID_SIZE; x++) {
+            for (let y = 0; y < GRID_SIZE; y++) {
+                if (x < GRID_SIZE - 1 && this.checkVirtualSwap(x, y, x + 1, y)) return true;
+                if (y < GRID_SIZE - 1 && this.checkVirtualSwap(x, y, x, y + 1)) return true;
+            }
+        }
+        return false;
+    }
+
+    checkVirtualSwap(x1, y1, x2, y2) {
+        if (this.board[x1][y1]?.special === SPECIAL_COLORBOMB || this.board[x2][y2]?.special === SPECIAL_COLORBOMB) return true;
+
+        const temp = this.board[x1][y1];
+        this.board[x1][y1] = this.board[x2][y2];
+        this.board[x2][y2] = temp;
+
+        const hasMatch = this.findMatches().matches.length > 0;
+
+        this.board[x2][y2] = this.board[x1][y1];
+        this.board[x1][y1] = temp;
+
+        return hasMatch;
+    }
+
+    updateScore(amount) {
+        this.score += amount;
+        this.scoreEl.textContent = this.score.toLocaleString();
+    }
+
+    showGameOver() {
+        localStorage.removeItem('m3_saved_board');
+        localStorage.removeItem('m3_saved_score');
+        this.overlay.classList.add('active');
+    }
+
+    saveState() {
+        const serializedBoard = this.board.map(col => 
+            col.map(tile => tile ? { type: tile.type, special: tile.special } : null)
+        );
+        localStorage.setItem('m3_saved_board', JSON.stringify(serializedBoard));
+        localStorage.setItem('m3_saved_score', this.score.toString());
+    }
+
+    loadStateOrNew() {
+        const savedBoard = localStorage.getItem('m3_saved_board');
+        const savedScore = localStorage.getItem('m3_saved_score');
+
+        if (savedBoard && savedScore !== null) {
+            try {
+                const parsed = JSON.parse(savedBoard);
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    for (let y = 0; y < GRID_SIZE; y++) {
+                        if (parsed[x][y]) {
+                            this.board[x][y] = new Tile(parsed[x][y].type, x, y, parsed[x][y].special);
+                        }
+                    }
+                }
+                this.score = parseInt(savedScore, 10);
+                this.updateScore(0);
+                return;
+            } catch (e) {
+                console.error("Could not load saved state", e);
+            }
+        }
+        this.startNewGame();
+    }
+
+    waitForAnimations() {
+        return new Promise(resolve => {
+            const check = () => {
+                let animating = false;
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    for (let y = 0; y < GRID_SIZE; y++) {
+                        if (this.board[x][y] && this.board[x][y].isAnimating()) {
+                            animating = true;
+                            break;
+                        }
+                    }
+                }
+                if (!animating && this.particles.length === 0 && this.rings.length === 0) resolve();
+                else requestAnimationFrame(check);
+            };
+            check();
+        });
+    }
+
+    render() {
+        this.ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+        // Grid lines
+        this.ctx.strokeStyle = '#22222b';
+        this.ctx.lineWidth = 2;
+        for (let i = 0; i <= GRID_SIZE; i++) {
+            this.ctx.beginPath();
+            this.ctx.moveTo(i * CELL_SIZE, 0);
+            this.ctx.lineTo(i * CELL_SIZE, CANVAS_SIZE);
+            this.ctx.stroke();
+
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, i * CELL_SIZE);
+            this.ctx.lineTo(CANVAS_SIZE, i * CELL_SIZE);
+            this.ctx.stroke();
+        }
+
+        // Render Tiles
+        const onLandCallback = (gx, gy, color) => {
+            // EFFECT 4: Drop impact ring at base of landing tile
+            const cx = (gx + 0.5) * CELL_SIZE;
+            const cy = (gy + 0.9) * CELL_SIZE;
+            this.rings.push(new ExpansionRing(cx, cy, color, 25, true));
+        };
+
+        for (let x = 0; x < GRID_SIZE; x++) {
+            for (let y = 0; y < GRID_SIZE; y++) {
+                const tile = this.board[x][y];
+                if (tile) {
+                    tile.update(onLandCallback);
+                    this.drawTile(tile);
+                }
+            }
+        }
+
+        // Render Effects
+        this.updateAndDrawEffects();
+    }
+
+    updateAndDrawEffects() {
+        // Particles
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+            p.update();
+            p.draw(this.ctx);
+            if (p.life <= 0) this.particles.splice(i, 1);
+        }
+
+        // Rings
+        for (let i = this.rings.length - 1; i >= 0; i--) {
+            const r = this.rings[i];
+            r.update();
+            r.draw(this.ctx);
+            if (r.life <= 0) this.rings.splice(i, 1);
+        }
+    }
+
+    drawTile(tile) {
+        const padding = 6;
+        const radius = 10;
+        const size = CELL_SIZE - padding * 2;
+        const rx = tile.renderX + padding + tile.shakeOffsetX;
+        const ry = tile.renderY + padding;
+
+        this.ctx.save();
+
+        this.ctx.fillStyle = COLORS[tile.type];
+        this.ctx.beginPath();
+        this.ctx.roundRect(rx, ry, size, size, radius);
+        this.ctx.fill();
+
+        // Highlight stroke during shake (invalid move feedback)
+        if (tile.shakeTimer > 0) {
+            this.ctx.strokeStyle = '#ff2e63';
+            this.ctx.lineWidth = 3;
+            this.ctx.stroke();
+        }
+
+        // Specials
+        if (tile.special === SPECIAL_LINE) {
+            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            this.ctx.fillRect(rx + size * 0.1, ry + size * 0.4, size * 0.8, size * 0.2);
+        } else if (tile.special === SPECIAL_BOMB) {
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.beginPath();
+            this.ctx.arc(rx + size / 2, ry + size / 2, size * 0.25, 0, Math.PI * 2);
+            this.ctx.fill();
+        } else if (tile.special === SPECIAL_COLORBOMB) {
+            this.ctx.strokeStyle = '#ffffff';
+            this.ctx.lineWidth = 4;
+            this.ctx.beginPath();
+            this.ctx.arc(rx + size / 2, ry + size / 2, size * 0.3, 0, Math.PI * 2);
+            this.ctx.stroke();
+        }
+
+        this.ctx.restore();
+    }
+
+    loop() {
+        this.render();
+        requestAnimationFrame(() => this.loop());
+    }
+}
+
+window.addEventListener('load', () => {
+    new Match3Game();
+});
+</script>
+</body>
+</html>
