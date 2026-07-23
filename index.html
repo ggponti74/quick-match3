@@ -41,16 +41,41 @@
             align-items: center;
         }
 
-        #score-board {
-            font-size: 1.5rem;
-            font-weight: bold;
+        header {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 12px;
+        }
+
+        #score-board {
+            font-size: 1.3rem;
+            font-weight: bold;
             letter-spacing: 1px;
             color: #ffffff;
         }
 
         #score-value {
-            color: #00e676; /* Vibrant green highlight for dynamic number */
+            color: #00e676; /* Vibrant green highlight */
+        }
+
+        #reset-btn {
+            background-color: #00adb5;
+            color: #ffffff;
+            border: none;
+            padding: 8px 16px;
+            font-size: 0.95rem;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        #reset-btn:active {
+            transform: scale(0.96);
+            background-color: #008c93;
         }
 
         canvas {
@@ -60,7 +85,7 @@
             background-color: #1e1e1e;
             border-radius: 8px;
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-            touch-action: none; /* Disables default browser touch gestures */
+            touch-action: none;
             display: block;
         }
     </style>
@@ -68,8 +93,10 @@
 <body>
 
     <div class="game-container">
-        <!-- Separate container keeps the label text safe -->
-        <div id="score-board">SCORE: <span id="score-value">0</span></div>
+        <header>
+            <div id="score-board">SCORE: <span id="score-value">0</span></div>
+            <button id="reset-btn">NEW GAME</button>
+        </header>
         <canvas id="gameCanvas" width="480" height="480"></canvas>
     </div>
 
@@ -83,10 +110,11 @@
             });
         }
 
-        // --- GAME LOGIC & ENGINE ---
+        // --- GAME ENGINE SETUP ---
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const scoreElement = document.getElementById('score-value');
+        const resetBtn = document.getElementById('reset-btn');
 
         const GRID_SIZE = 8;
         const TILE_SIZE = canvas.width / GRID_SIZE; // 60px
@@ -94,8 +122,9 @@
         let score = 0;
         let grid = [];
         let selectedTile = null;
+        let dragStartTile = null;
+        let isProcessing = false;
 
-        // Distinct shape and color mapping
         const TILE_TYPES = [
             { id: 0, name: 'diamond',  color: '#e91e63' }, // Pink
             { id: 1, name: 'square',   color: '#2196f3' }, // Blue
@@ -105,46 +134,52 @@
             { id: 5, name: 'star',     color: '#ff9800' }  // Orange
         ];
 
-        // --- AUDIO ENGINE (Web Audio API) ---
+        // --- AUDIO ENGINE ---
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         let audioCtx = null;
 
-        function playSwapSound() {
+        function playSound(freq, duration = 0.1, ramp = true) {
             if (!audioCtx) audioCtx = new AudioContext();
             if (audioCtx.state === 'suspended') audioCtx.resume();
             
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.type = 'sine';
-            osc.frequency.setValueAtTime(300, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.1);
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            if (ramp) {
+                osc.frequency.exponentialRampToValueAtTime(freq * 1.5, audioCtx.currentTime + duration);
+            }
             gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             osc.start();
-            osc.stop(audioCtx.currentTime + 0.1);
+            osc.stop(audioCtx.currentTime + duration);
         }
 
-        // --- INITIALIZATION ---
-        function initGrid() {
+        // --- GAME INITIALIZATION ---
+        function initGame() {
+            score = 0;
+            scoreElement.innerText = score;
+            selectedTile = null;
+            dragStartTile = null;
+            isProcessing = false;
+
+            do {
+                createRandomBoard();
+            } while (checkMatches().length > 0); // Ensure clean board on start
+
+            drawBoard();
+        }
+
+        function createRandomBoard() {
             grid = [];
             for (let r = 0; r < GRID_SIZE; r++) {
                 grid[r] = [];
                 for (let c = 0; c < GRID_SIZE; c++) {
-                    grid[r][c] = getRandomTileType();
+                    grid[r][c] = TILE_TYPES[Math.floor(Math.random() * TILE_TYPES.length)];
                 }
             }
-            drawBoard();
-        }
-
-        function getRandomTileType() {
-            return TILE_TYPES[Math.floor(Math.random() * TILE_TYPES.length)];
-        }
-
-        function updateScore(points) {
-            score += points;
-            scoreElement.innerText = score;
         }
 
         // --- RENDERING ROUTINES ---
@@ -157,16 +192,15 @@
                     const x = c * TILE_SIZE;
                     const y = r * TILE_SIZE;
 
-                    // Draw grid background cell
+                    // Grid cell border
                     ctx.strokeStyle = '#2a2a2a';
                     ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
 
-                    // Draw tile shape if tile exists
                     if (tile) {
                         drawShape(ctx, x, y, TILE_SIZE, tile);
                     }
 
-                    // Highlight selected tile
+                    // Selection highlight
                     if (selectedTile && selectedTile.r === r && selectedTile.c === c) {
                         ctx.strokeStyle = '#ffffff';
                         ctx.lineWidth = 3;
@@ -194,21 +228,17 @@
                     ctx.lineTo(cx, y + size - pad);
                     ctx.lineTo(x + pad, cy);
                     break;
-
                 case 'square':
                     ctx.rect(x + pad, y + pad, w, h);
                     break;
-
                 case 'circle':
                     ctx.arc(cx, cy, w / 2, 0, Math.PI * 2);
                     break;
-
                 case 'triangle':
                     ctx.moveTo(cx, y + pad);
                     ctx.lineTo(x + size - pad, y + size - pad);
                     ctx.lineTo(x + pad, y + size - pad);
                     break;
-
                 case 'hexagon':
                     const r = w / 2;
                     for (let i = 0; i < 6; i++) {
@@ -219,7 +249,6 @@
                         else ctx.lineTo(hx, hy);
                     }
                     break;
-
                 case 'star':
                     const outerR = w / 2;
                     const innerR = outerR / 2.2;
@@ -238,46 +267,89 @@
             ctx.fill();
         }
 
-        // --- INTERACTION LOGIC ---
-        function handleTouch(e) {
-            // Stops text selection, scrolling, and blue highlight artifacts
-            e.preventDefault();
+        // --- MATCH-3 EVALUATION & CASCADE PIPELINE ---
+        function checkMatches() {
+            let matched = new Set();
 
-            const rect = canvas.getBoundingClientRect();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
-            // Map screen coordinates strictly to canvas internal coordinate space
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-
-            const col = Math.floor((clientX - rect.left) * scaleX / TILE_SIZE);
-            const row = Math.floor((clientY - rect.top) * scaleY / TILE_SIZE);
-
-            if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE) {
-                onTileSelect(row, col);
-            }
-        }
-
-        function onTileSelect(r, c) {
-            if (!selectedTile) {
-                selectedTile = { r, c };
-            } else {
-                // Check if adjacent tap
-                const distR = Math.abs(selectedTile.r - r);
-                const distC = Math.abs(selectedTile.c - c);
-                const isAdjacent = (distR === 1 && distC === 0) || (distR === 0 && distC === 1);
-
-                if (isAdjacent) {
-                    swapTiles(selectedTile.r, selectedTile.c, r, c);
-                    playSwapSound();
-                    updateScore(10); // Simple score bump for test
-                    selectedTile = null;
-                } else {
-                    selectedTile = { r, c }; // Re-select new tile if not adjacent
+            // Horizontal Matches
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE - 2; c++) {
+                    let type = grid[r][c]?.id;
+                    if (type !== undefined && type === grid[r][c+1]?.id && type === grid[r][c+2]?.id) {
+                        matched.add(`${r},${c}`);
+                        matched.add(`${r},${c+1}`);
+                        matched.add(`${r},${c+2}`);
+                    }
                 }
             }
+
+            // Vertical Matches
+            for (let c = 0; c < GRID_SIZE; c++) {
+                for (let r = 0; r < GRID_SIZE - 2; r++) {
+                    let type = grid[r][c]?.id;
+                    if (type !== undefined && type === grid[r+1][c]?.id && type === grid[r+2][c]?.id) {
+                        matched.add(`${r},${c}`);
+                        matched.add(`${r+1},${c}`);
+                        matched.add(`${r+2},${c}`);
+                    }
+                }
+            }
+
+            return Array.from(matched).map(coord => {
+                const [r, c] = coord.split(',').map(Number);
+                return { r, c };
+            });
+        }
+
+        async function processTurn(r1, c1, r2, c2) {
+            isProcessing = true;
+            swapTiles(r1, c1, r2, c2);
             drawBoard();
+
+            let matches = checkMatches();
+
+            if (matches.length === 0) {
+                // Invalid move: revert back
+                await sleep(200);
+                swapTiles(r1, c1, r2, c2);
+                playSound(150, 0.15, false); // Low thud for invalid move
+                drawBoard();
+                isProcessing = false;
+                return;
+            }
+
+            playSound(350, 0.1);
+
+            // Cascade loop for chain reactions
+            while (matches.length > 0) {
+                await sleep(150);
+                
+                // Clear matched tiles and grant score
+                matches.forEach(({ r, c }) => {
+                    grid[r][c] = null;
+                });
+                score += matches.length * 10;
+                scoreElement.innerText = score;
+                playSound(500 + (matches.length * 20), 0.15);
+                drawBoard();
+
+                await sleep(150);
+                
+                // Drop existing tiles down
+                dropTiles();
+                drawBoard();
+
+                await sleep(150);
+
+                // Fill empty top cells
+                fillTopTiles();
+                drawBoard();
+
+                // Check for chain-reaction matches
+                matches = checkMatches();
+            }
+
+            isProcessing = false;
         }
 
         function swapTiles(r1, c1, r2, c2) {
@@ -286,12 +358,117 @@
             grid[r2][c2] = temp;
         }
 
-        // Attach listeners with passive: false to allow e.preventDefault()
-        canvas.addEventListener('touchstart', handleTouch, { passive: false });
-        canvas.addEventListener('mousedown', handleTouch);
+        function dropTiles() {
+            for (let c = 0; c < GRID_SIZE; c++) {
+                let emptyRow = GRID_SIZE - 1;
+                for (let r = GRID_SIZE - 1; r >= 0; r--) {
+                    if (grid[r][c] !== null) {
+                        if (r !== emptyRow) {
+                            grid[emptyRow][c] = grid[r][c];
+                            grid[r][c] = null;
+                        }
+                        emptyRow--;
+                    }
+                }
+            }
+        }
 
-        // Start
-        initGrid();
+        function fillTopTiles() {
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    if (grid[r][c] === null) {
+                        grid[r][c] = TILE_TYPES[Math.floor(Math.random() * TILE_TYPES.length)];
+                    }
+                }
+            }
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // --- DRAG & TAP TOUCH/MOUSE CONTROLS ---
+        function getCanvasCell(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+
+            const col = Math.floor((clientX - rect.left) * scaleX / TILE_SIZE);
+            const row = Math.floor((clientY - rect.top) * scaleY / TILE_SIZE);
+
+            if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE) {
+                return { r: row, c: col };
+            }
+            return null;
+        }
+
+        function handlePointerDown(e) {
+            e.preventDefault();
+            if (isProcessing) return;
+
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+            const cell = getCanvasCell(clientX, clientY);
+            if (cell) {
+                dragStartTile = cell;
+            }
+        }
+
+        function handlePointerUp(e) {
+            e.preventDefault();
+            if (isProcessing || !dragStartTile) return;
+
+            const clientX = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
+            const clientY = e.changedTouches ? e.changedTouches[0].clientY : e.clientY;
+
+            const endCell = getCanvasCell(clientX, clientY);
+
+            if (endCell) {
+                const distR = endCell.r - dragStartTile.r;
+                const distC = endCell.c - dragStartTile.c;
+                const isAdjacent = (Math.abs(distR) === 1 && distC === 0) || (Math.abs(distR) === 0 && Math.abs(distC) === 1);
+
+                if (isAdjacent) {
+                    // Dragged to adjacent tile
+                    selectedTile = null;
+                    processTurn(dragStartTile.r, dragStartTile.c, endCell.r, endCell.c);
+                } else if (dragStartTile.r === endCell.r && dragStartTile.c === endCell.c) {
+                    // Tap / Click fallback selection
+                    if (!selectedTile) {
+                        selectedTile = dragStartTile;
+                    } else {
+                        const selDistR = Math.abs(selectedTile.r - endCell.r);
+                        const selDistC = Math.abs(selectedTile.c - endCell.c);
+                        const isSelAdjacent = (selDistR === 1 && selDistC === 0) || (selDistR === 0 && selDistC === 1);
+
+                        if (isSelAdjacent) {
+                            const prev = selectedTile;
+                            selectedTile = null;
+                            processTurn(prev.r, prev.c, endCell.r, endCell.c);
+                        } else {
+                            selectedTile = endCell;
+                        }
+                    }
+                }
+            }
+
+            dragStartTile = null;
+            drawBoard();
+        }
+
+        // Event Listeners
+        canvas.addEventListener('touchstart', handlePointerDown, { passive: false });
+        canvas.addEventListener('touchend', handlePointerUp, { passive: false });
+        canvas.addEventListener('mousedown', handlePointerDown);
+        canvas.addEventListener('mouseup', handlePointerUp);
+
+        resetBtn.addEventListener('click', () => {
+            initGame();
+        });
+
+        // Start Game
+        initGame();
     </script>
 </body>
 </html>
