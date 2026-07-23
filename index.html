@@ -2,1022 +2,296 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Match-3</title>
     <link rel="manifest" href="manifest.json">
-    <title>Quick Match-3</title>
     <style>
-        :root {
-            --bg-color: #121214;
-            --panel-bg: #1e1e24;
-            --text-color: #e0e0e0;
-            --accent-color: #00adb5;
-            --danger-color: #ff2e63;
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
 
         body {
-            margin: 4px;
-            padding: 4px;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             min-height: 100vh;
+            overflow-x: hidden;
+            
+            /* Prevent native mobile text selection & callouts */
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
             user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .game-container {
-            position: relative;
-            background-color: var(--panel-bg);
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            width: 100%;
+            max-width: 480px;
+            padding: 12px;
             display: flex;
             flex-direction: column;
             align-items: center;
         }
 
-        header {
-            width: 100%;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-
-  .score-box {
-    font-size: 1.2rem;
-    font-weight: bold;
-    color: var(--text-color); /* Ensures 'SCORE:' is visible */
-}
-
-.score-label {
-    color: #ffffff; /* Bright white contrast */
-}
-
-
-        button {
-            background-color: var(--accent-color);
-            color: #fff;
-            border: none;
-            padding: 8px 16px;
-            font-size: 0.9rem;
+        #score-board {
+            font-size: 1.5rem;
             font-weight: bold;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: background 0.2s, transform 0.1s;
+            margin-bottom: 12px;
+            letter-spacing: 1px;
+            color: #ffffff;
         }
 
-        button:hover {
-            background-color: #008c93;
-        }
-
-        button:active {
-            transform: scale(0.96);
-        }
-
-        .canvas-wrapper {
-            position: relative;
+        #score-value {
+            color: #00e676; /* Vibrant green highlight for dynamic number */
         }
 
         canvas {
-            border-radius: 8px;
-            background-color: #16161a;
-            cursor: pointer;
-            display: block;
-        }
-
-        .overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
             width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.85);
+            height: auto;
+            aspect-ratio: 1 / 1;
+            background-color: #1e1e1e;
             border-radius: 8px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s ease;
-        }
-
-        .overlay.active {
-            opacity: 1;
-            pointer-events: auto;
-        }
-
-        .overlay h1 {
-            font-size: 2rem;
-            color: var(--danger-color);
-            margin: 0 0 10px 0;
-        }
-
-        .overlay p {
-            margin: 0 0 20px 0;
-            font-size: 1.1rem;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+            touch-action: none; /* Disables default browser touch gestures */
+            display: block;
         }
     </style>
 </head>
 <body>
 
-<div class="game-container">
-    
-<!-- HTML -->
-<header>
-    <div class="score-box">
-        <span style="color: #e0e0e0;">SCORE:</span>
-        <span id="score" class="score-value">0</span>
-    </div>
-    <button id="reset-btn">NEW GAME</button>
-</header>
-
-    <div class="canvas-wrapper">
+    <div class="game-container">
+        <!-- Separate container keeps the label text safe -->
+        <div id="score-board">SCORE: <span id="score-value">0</span></div>
         <canvas id="gameCanvas" width="480" height="480"></canvas>
-        <div id="game-over-overlay" class="overlay">
-            <h1>NO MORE MOVES!</h1>
-            <p>Game Over</p>
-            <button id="restart-btn">START NEW GAME</button>
-        </div>
     </div>
-</div>
 
-<script>
-/**
- * Web Audio Synthesizer Engine
- */
-class SoundEngine {
-    constructor() {
-        this.ctx = null;
-    }
-
-    init() {
-        if (!this.ctx) {
-            const AudioCtx = window.AudioContext || window.webkitAudioContext;
-            this.ctx = new AudioCtx();
-        }
-        if (this.ctx.state === 'suspended') {
-            this.ctx.resume();
-        }
-    }
-
-    // Invalid Swap sound (Error double-tone)
-    playInvalidSwap() {
-        this.init();
-        const now = this.ctx.currentTime;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(160, now);
-        osc.frequency.setValueAtTime(110, now + 0.08);
-
-        gain.gain.setValueAtTime(0.15, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-
-        osc.start(now);
-        osc.stop(now + 0.2);
-    }
-
-    // Valid Swap sound (Rising Pitch Sweep)
-    playValidSwap() {
-        this.init();
-        const now = this.ctx.currentTime;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(300, now);
-        osc.frequency.exponentialRampToValueAtTime(600, now + 0.12);
-
-        gain.gain.setValueAtTime(0.2, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
-
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-
-        osc.start(now);
-        osc.stop(now + 0.12);
-    }
-
-    // Tile Elimination Chime
-    playMatch() {
-        this.init();
-        const now = this.ctx.currentTime;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(523.25, now); // C5
-        osc.frequency.setValueAtTime(659.25, now + 0.05); // E5
-        osc.frequency.setValueAtTime(783.99, now + 0.1); // G5
-
-        gain.gain.setValueAtTime(0.15, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
-
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-
-        osc.start(now);
-        osc.stop(now + 0.25);
-    }
-
-    // Tile Impact Thud (Landing effect)
-    playDropImpact() {
-        this.init();
-        const now = this.ctx.currentTime;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(120, now);
-        osc.frequency.exponentialRampToValueAtTime(40, now + 0.05);
-
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
-
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-
-        osc.start(now);
-        osc.stop(now + 0.05);
-    }
-}
-
-const soundFx = new SoundEngine();
-
-const GRID_SIZE = 8;
-const TILE_TYPES = 6;
-const CELL_SIZE = 60;
-const CANVAS_SIZE = GRID_SIZE * CELL_SIZE;
-
-const COLORS = [
-    '#FF5722', // Orange
-    '#2196F3', // Blue
-    '#4CAF50', // Green
-    '#9C27B0', // Purple
-    '#FFEB3B', // Yellow
-    '#E91E63'  // Pink
-];
-
-const SPECIAL_NONE = 0;
-const SPECIAL_LINE = 1;
-const SPECIAL_BOMB = 2;
-const SPECIAL_COLORBOMB = 3;
-
-class GeometricParticle {
-    constructor(x, y, color, shapeType) {
-        this.x = x;
-        this.y = y;
-        this.color = color;
-        this.shapeType = shapeType;
-        this.size = Math.random() * 8 + 6;
-        this.vx = (Math.random() - 0.5) * 8;
-        this.vy = (Math.random() - 0.5) * 8;
-        this.rotation = Math.random() * Math.PI * 2;
-        this.vRot = (Math.random() - 0.5) * 0.2;
-        this.life = 1.0;
-        this.decay = Math.random() * 0.03 + 0.02;
-    }
-
-    update() {
-        this.x += this.vx;
-        this.y += this.vy;
-        this.vy += 0.15;
-        this.rotation += this.vRot;
-        this.life -= this.decay;
-    }
-
-    draw(ctx) {
-        if (this.life <= 0) return;
-        ctx.save();
-        ctx.translate(this.x, this.y);
-        ctx.rotate(this.rotation);
-        ctx.globalAlpha = Math.max(0, this.life);
-        ctx.fillStyle = this.color;
-
-        const s = this.size;
-        ctx.beginPath();
-        if (this.shapeType === 'square') {
-            ctx.fillRect(-s/2, -s/2, s, s);
-        } else if (this.shapeType === 'triangle') {
-            ctx.moveTo(0, -s/2);
-            ctx.lineTo(s/2, s/2);
-            ctx.lineTo(-s/2, s/2);
-            ctx.closePath();
-            ctx.fill();
-        } else if (this.shapeType === 'diamond') {
-            ctx.moveTo(0, -s/2);
-            ctx.lineTo(s/2, 0);
-            ctx.lineTo(0, s/2);
-            ctx.lineTo(-s/2, 0);
-            ctx.closePath();
-            ctx.fill();
-        }
-        ctx.restore();
-    }
-}
-
-class ExpansionRing {
-    constructor(x, y, color, maxRadius = 40, isEllipse = false) {
-        this.x = x;
-        this.y = y;
-        this.color = color;
-        this.radius = 4;
-        this.maxRadius = maxRadius;
-        this.life = 1.0;
-        this.isEllipse = isEllipse;
-    }
-
-    update() {
-        this.radius += 2.5;
-        this.life = 1.0 - (this.radius / this.maxRadius);
-    }
-
-    draw(ctx) {
-        if (this.life <= 0) return;
-        ctx.save();
-        ctx.globalAlpha = Math.max(0, this.life);
-        ctx.strokeStyle = this.color;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-
-        if (this.isEllipse) {
-            ctx.ellipse(this.x, this.y, this.radius, this.radius * 0.3, 0, 0, Math.PI * 2);
-        } else {
-            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        }
-        ctx.stroke();
-        ctx.restore();
-    }
-}
-
-class Tile {
-    constructor(type, x, y, special = SPECIAL_NONE) {
-        this.type = type;
-        this.gridX = x;
-        this.gridY = y;
-        this.renderX = x * CELL_SIZE;
-        this.renderY = y * CELL_SIZE;
-        this.special = special;
-        this.isMatched = false;
-        this.shakeOffsetX = 0;
-        this.shakeTimer = 0;
-        this.wasAirborne = false;
-    }
-
-    update(onLandCallback) {
-        const targetX = this.gridX * CELL_SIZE;
-        const targetY = this.gridY * CELL_SIZE;
-        const speed = 0.25;
-
-        if (Math.abs(this.renderY - targetY) > 5) {
-            this.wasAirborne = true;
+    <script>
+        // --- PWA SERVICE WORKER REGISTRATION ---
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(reg => console.log('SW Registered'))
+                    .catch(err => console.log('SW Error:', err));
+            });
         }
 
-        this.renderX += (targetX - this.renderX) * speed;
-        this.renderY += (targetY - this.renderY) * speed;
+        // --- GAME LOGIC & ENGINE ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score-value');
 
-        if (Math.abs(this.renderX - targetX) < 0.5) this.renderX = targetX;
-        if (Math.abs(this.renderY - targetY) < 0.5) {
-            this.renderY = targetY;
-            if (this.wasAirborne) {
-                this.wasAirborne = false;
-                if (onLandCallback) onLandCallback(this.gridX, this.gridY, COLORS[this.type]);
+        const GRID_SIZE = 8;
+        const TILE_SIZE = canvas.width / GRID_SIZE; // 60px
+        
+        let score = 0;
+        let grid = [];
+        let selectedTile = null;
+
+        // Distinct shape and color mapping
+        const TILE_TYPES = [
+            { id: 0, name: 'diamond',  color: '#e91e63' }, // Pink
+            { id: 1, name: 'square',   color: '#2196f3' }, // Blue
+            { id: 2, name: 'circle',   color: '#4caf50' }, // Green
+            { id: 3, name: 'triangle', color: '#ffeb3b' }, // Yellow
+            { id: 4, name: 'hexagon',  color: '#9c27b0' }, // Purple
+            { id: 5, name: 'star',     color: '#ff9800' }  // Orange
+        ];
+
+        // --- AUDIO ENGINE (Web Audio API) ---
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx = null;
+
+        function playSwapSound() {
+            if (!audioCtx) audioCtx = new AudioContext();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+        }
+
+        // --- INITIALIZATION ---
+        function initGrid() {
+            grid = [];
+            for (let r = 0; r < GRID_SIZE; r++) {
+                grid[r] = [];
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    grid[r][c] = getRandomTileType();
+                }
+            }
+            drawBoard();
+        }
+
+        function getRandomTileType() {
+            return TILE_TYPES[Math.floor(Math.random() * TILE_TYPES.length)];
+        }
+
+        function updateScore(points) {
+            score += points;
+            scoreElement.innerText = score;
+        }
+
+        // --- RENDERING ROUTINES ---
+        function drawBoard() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    const tile = grid[r][c];
+                    const x = c * TILE_SIZE;
+                    const y = r * TILE_SIZE;
+
+                    // Draw grid background cell
+                    ctx.strokeStyle = '#2a2a2a';
+                    ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+
+                    // Draw tile shape if tile exists
+                    if (tile) {
+                        drawShape(ctx, x, y, TILE_SIZE, tile);
+                    }
+
+                    // Highlight selected tile
+                    if (selectedTile && selectedTile.r === r && selectedTile.c === c) {
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 3;
+                        ctx.strokeRect(x + 2, y + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+                        ctx.lineWidth = 1;
+                    }
+                }
             }
         }
 
-        if (this.shakeTimer > 0) {
-            this.shakeTimer--;
-            this.shakeOffsetX = Math.sin(this.shakeTimer * 0.8) * 6;
-        } else {
-            this.shakeOffsetX = 0;
+        function drawShape(ctx, x, y, size, tile) {
+            const pad = size * 0.15;
+            const cx = x + size / 2;
+            const cy = y + size / 2;
+            const w = size - pad * 2;
+            const h = size - pad * 2;
+
+            ctx.fillStyle = tile.color;
+            ctx.beginPath();
+
+            switch (tile.name) {
+                case 'diamond':
+                    ctx.moveTo(cx, y + pad);
+                    ctx.lineTo(x + size - pad, cy);
+                    ctx.lineTo(cx, y + size - pad);
+                    ctx.lineTo(x + pad, cy);
+                    break;
+
+                case 'square':
+                    ctx.rect(x + pad, y + pad, w, h);
+                    break;
+
+                case 'circle':
+                    ctx.arc(cx, cy, w / 2, 0, Math.PI * 2);
+                    break;
+
+                case 'triangle':
+                    ctx.moveTo(cx, y + pad);
+                    ctx.lineTo(x + size - pad, y + size - pad);
+                    ctx.lineTo(x + pad, y + size - pad);
+                    break;
+
+                case 'hexagon':
+                    const r = w / 2;
+                    for (let i = 0; i < 6; i++) {
+                        const angle = (Math.PI / 3) * i;
+                        const hx = cx + r * Math.cos(angle);
+                        const hy = cy + r * Math.sin(angle);
+                        if (i === 0) ctx.moveTo(hx, hy);
+                        else ctx.lineTo(hx, hy);
+                    }
+                    break;
+
+                case 'star':
+                    const outerR = w / 2;
+                    const innerR = outerR / 2.2;
+                    for (let i = 0; i < 10; i++) {
+                        const radius = i % 2 === 0 ? outerR : innerR;
+                        const angle = (Math.PI / 5) * i - Math.PI / 2;
+                        const sx = cx + radius * Math.cos(angle);
+                        const sy = cy + radius * Math.sin(angle);
+                        if (i === 0) ctx.moveTo(sx, sy);
+                        else ctx.lineTo(sx, sy);
+                    }
+                    break;
+            }
+
+            ctx.closePath();
+            ctx.fill();
         }
-    }
 
-    triggerShake() {
-        this.shakeTimer = 15;
-    }
+        // --- INTERACTION LOGIC ---
+        function handleTouch(e) {
+            // Stops text selection, scrolling, and blue highlight artifacts
+            e.preventDefault();
 
-    isAnimating() {
-        return this.renderX !== this.gridX * CELL_SIZE || 
-               this.renderY !== this.gridY * CELL_SIZE || 
-               this.shakeTimer > 0;
-    }
-}
-
-class Match3Game {
-    constructor() {
-        this.canvas = document.getElementById('gameCanvas');
-        this.ctx = this.canvas.getContext('2d');
-        this.scoreEl = document.getElementById('score');
-        this.overlay = document.getElementById('game-over-overlay');
-        
-        this.board = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
-        this.score = 0;
-        
-        this.particles = [];
-        this.rings = [];
-
-        this.isBusy = false;
-        this.isDragging = false;
-        this.dragStartTile = null;
-        this.dragCurrentPos = { x: 0, y: 0 };
-
-        this.initEvents();
-        this.loadStateOrNew();
-        this.loop();
-    }
-
-    initEvents() {
-        document.getElementById('reset-btn').addEventListener('click', () => this.startNewGame());
-        document.getElementById('restart-btn').addEventListener('click', () => {
-            this.overlay.classList.remove('active');
-            this.startNewGame();
-        });
-
-        const getPos = (e) => {
-            const rect = this.canvas.getBoundingClientRect();
+            const rect = canvas.getBoundingClientRect();
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            return {
-                x: clientX - rect.left,
-                y: clientY - rect.top
-            };
-        };
 
-        const handleStart = (e) => {
-            soundFx.init(); // Initialize audio context on first interaction
-            if (this.isBusy) return;
-            const pos = getPos(e);
-            const gx = Math.floor(pos.x / CELL_SIZE);
-            const gy = Math.floor(pos.y / CELL_SIZE);
+            // Map screen coordinates strictly to canvas internal coordinate space
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
 
-            if (gx >= 0 && gx < GRID_SIZE && gy >= 0 && gy < GRID_SIZE) {
-                this.isDragging = true;
-                this.dragStartTile = { x: gx, y: gy };
-                this.dragCurrentPos = pos;
+            const col = Math.floor((clientX - rect.left) * scaleX / TILE_SIZE);
+            const row = Math.floor((clientY - rect.top) * scaleY / TILE_SIZE);
+
+            if (col >= 0 && col < GRID_SIZE && row >= 0 && row < GRID_SIZE) {
+                onTileSelect(row, col);
             }
-        };
+        }
 
-        const handleMove = (e) => {
-            if (!this.isDragging || this.isBusy) return;
-            const pos = getPos(e);
-            this.dragCurrentPos = pos;
+        function onTileSelect(r, c) {
+            if (!selectedTile) {
+                selectedTile = { r, c };
+            } else {
+                // Check if adjacent tap
+                const distR = Math.abs(selectedTile.r - r);
+                const distC = Math.abs(selectedTile.c - c);
+                const isAdjacent = (distR === 1 && distC === 0) || (distR === 0 && distC === 1);
 
-            const dx = pos.x - (this.dragStartTile.x + 0.5) * CELL_SIZE;
-            const dy = pos.y - (this.dragStartTile.y + 0.5) * CELL_SIZE;
-
-            if (Math.abs(dx) > CELL_SIZE * 0.4 || Math.abs(dy) > CELL_SIZE * 0.4) {
-                let targetX = this.dragStartTile.x;
-                let targetY = this.dragStartTile.y;
-
-                if (Math.abs(dx) > Math.abs(dy)) {
-                    targetX += dx > 0 ? 1 : -1;
+                if (isAdjacent) {
+                    swapTiles(selectedTile.r, selectedTile.c, r, c);
+                    playSwapSound();
+                    updateScore(10); // Simple score bump for test
+                    selectedTile = null;
                 } else {
-                    targetY += dy > 0 ? 1 : -1;
-                }
-
-                this.isDragging = false;
-
-                if (targetX >= 0 && targetX < GRID_SIZE && targetY >= 0 && targetY < GRID_SIZE) {
-                    this.trySwap(this.dragStartTile.x, this.dragStartTile.y, targetX, targetY);
+                    selectedTile = { r, c }; // Re-select new tile if not adjacent
                 }
             }
-        };
-
-        const handleEnd = () => { this.isDragging = false; };
-
-        this.canvas.addEventListener('mousedown', handleStart);
-        this.canvas.addEventListener('mousemove', handleMove);
-        window.addEventListener('mouseup', handleEnd);
-
-        this.canvas.addEventListener('touchstart', handleStart, { passive: true });
-        this.canvas.addEventListener('touchmove', handleMove, { passive: true });
-        window.addEventListener('touchend', handleEnd);
-    }
-
-    startNewGame() {
-        this.score = 0;
-        this.updateScore(0);
-        this.generateInitialBoard();
-        this.saveState();
-    }
-
-    generateInitialBoard() {
-        let hasMatches = true;
-        while (hasMatches) {
-            for (let x = 0; x < GRID_SIZE; x++) {
-                for (let y = 0; y < GRID_SIZE; y++) {
-                    const type = Math.floor(Math.random() * TILE_TYPES);
-                    this.board[x][y] = new Tile(type, x, y);
-                }
-            }
-            hasMatches = this.findMatches().matches.length > 0;
+            drawBoard();
         }
 
-        if (!this.hasValidMoves()) {
-            this.generateInitialBoard();
-        }
-    }
-
-    async trySwap(x1, y1, x2, y2) {
-        this.isBusy = true;
-
-        const tile1 = this.board[x1][y1];
-        const tile2 = this.board[x2][y2];
-
-        this.swapBoardTiles(x1, y1, x2, y2);
-        await this.waitForAnimations();
-
-        const isColorBombSwap = tile1.special === SPECIAL_COLORBOMB || tile2.special === SPECIAL_COLORBOMB;
-        const matchResult = this.findMatches();
-
-        if (matchResult.matches.length > 0 || isColorBombSwap) {
-            // SOUND: Valid Swap
-            soundFx.playValidSwap();
-
-            const midX = (x1 + x2 + 1) * CELL_SIZE / 2;
-            const midY = (y1 + y2 + 1) * CELL_SIZE / 2;
-            this.rings.push(new ExpansionRing(midX, midY, '#00adb5', 60));
-
-            if (isColorBombSwap) {
-                this.handleColorBombSwap(tile1, tile2);
-            }
-            await this.processCascade();
-        } else {
-            // SOUND: Invalid Swap Error
-            soundFx.playInvalidSwap();
-
-            tile1.triggerShake();
-            tile2.triggerShake();
-
-            this.swapBoardTiles(x1, y1, x2, y2);
-            await this.waitForAnimations();
-            this.isBusy = false;
-        }
-    }
-
-    swapBoardTiles(x1, y1, x2, y2) {
-        const temp = this.board[x1][y1];
-        this.board[x1][y1] = this.board[x2][y2];
-        this.board[x2][y2] = temp;
-
-        this.board[x1][y1].gridX = x1;
-        this.board[x1][y1].gridY = y1;
-        this.board[x2][y2].gridX = x2;
-        this.board[x2][y2].gridY = y2;
-    }
-
-    handleColorBombSwap(tile1, tile2) {
-        const colorBomb = tile1.special === SPECIAL_COLORBOMB ? tile1 : tile2;
-        const targetTile = tile1.special === SPECIAL_COLORBOMB ? tile2 : tile1;
-
-        colorBomb.isMatched = true;
-        const targetType = targetTile.type;
-
-        for (let x = 0; x < GRID_SIZE; x++) {
-            for (let y = 0; y < GRID_SIZE; y++) {
-                if (this.board[x][y] && this.board[x][y].type === targetType) {
-                    this.board[x][y].isMatched = true;
-                }
-            }
-        }
-    }
-
-    findMatches() {
-        const gridMatched = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(false));
-        
-        for (let y = 0; y < GRID_SIZE; y++) {
-            for (let x = 0; x < GRID_SIZE - 2; x++) {
-                const t1 = this.board[x][y];
-                const t2 = this.board[x+1][y];
-                const t3 = this.board[x+2][y];
-                if (t1 && t2 && t3 && t1.type === t2.type && t2.type === t3.type && t1.special !== SPECIAL_COLORBOMB) {
-                    gridMatched[x][y] = true;
-                    gridMatched[x+1][y] = true;
-                    gridMatched[x+2][y] = true;
-                }
-            }
+        function swapTiles(r1, c1, r2, c2) {
+            const temp = grid[r1][c1];
+            grid[r1][c1] = grid[r2][c2];
+            grid[r2][c2] = temp;
         }
 
-        for (let x = 0; x < GRID_SIZE; x++) {
-            for (let y = 0; y < GRID_SIZE - 2; y++) {
-                const t1 = this.board[x][y];
-                const t2 = this.board[x][y+1];
-                const t3 = this.board[x][y+2];
-                if (t1 && t2 && t3 && t1.type === t2.type && t2.type === t3.type && t1.special !== SPECIAL_COLORBOMB) {
-                    gridMatched[x][y] = true;
-                    gridMatched[x][y+1] = true;
-                    gridMatched[x][y+2] = true;
-                }
-            }
-        }
+        // Attach listeners with passive: false to allow e.preventDefault()
+        canvas.addEventListener('touchstart', handleTouch, { passive: false });
+        canvas.addEventListener('mousedown', handleTouch);
 
-        const matchesList = [];
-        for (let x = 0; x < GRID_SIZE; x++) {
-            for (let y = 0; y < GRID_SIZE; y++) {
-                if (gridMatched[x][y]) {
-                    matchesList.push(this.board[x][y]);
-                }
-            }
-        }
-
-        return { matches: matchesList, gridMatched };
-    }
-
-    async processCascade() {
-        let cascadeCycle = true;
-
-        while (cascadeCycle) {
-            const { matches, gridMatched } = this.findMatches();
-            const activeMatches = matches.filter(t => !t.isMatched);
-            
-            for (let x = 0; x < GRID_SIZE; x++) {
-                for (let y = 0; y < GRID_SIZE; y++) {
-                    if (this.board[x][y] && this.board[x][y].isMatched && !activeMatches.includes(this.board[x][y])) {
-                        activeMatches.push(this.board[x][y]);
-                    }
-                }
-            }
-
-            if (activeMatches.length === 0) {
-                cascadeCycle = false;
-                break;
-            }
-
-            // SOUND: Match Elimination Chime
-            soundFx.playMatch();
-
-            activeMatches.forEach(t => t.isMatched = true);
-            this.expandSpecialEffects();
-            const createdSpecials = this.detectSpecialFormations(gridMatched);
-
-            let points = 0;
-            const shapes = ['square', 'triangle', 'diamond'];
-
-            for (let x = 0; x < GRID_SIZE; x++) {
-                for (let y = 0; y < GRID_SIZE; y++) {
-                    const tile = this.board[x][y];
-                    if (tile && tile.isMatched) {
-                        points += 10;
-                        const centerX = (x + 0.5) * CELL_SIZE;
-                        const centerY = (y + 0.5) * CELL_SIZE;
-                        const color = COLORS[tile.type];
-
-                        for (let p = 0; p < 8; p++) {
-                            const randomShape = shapes[Math.floor(Math.random() * shapes.length)];
-                            this.particles.push(new GeometricParticle(centerX, centerY, color, randomShape));
-                        }
-                    }
-                }
-            }
-            this.updateScore(points);
-
-            for (let x = 0; x < GRID_SIZE; x++) {
-                for (let y = 0; y < GRID_SIZE; y++) {
-                    if (this.board[x][y] && this.board[x][y].isMatched) {
-                        const created = createdSpecials.find(s => s.x === x && s.y === y);
-                        if (created) {
-                            this.board[x][y].isMatched = false;
-                            this.board[x][y].special = created.special;
-                        } else {
-                            this.board[x][y] = null;
-                        }
-                    }
-                }
-            }
-
-            await this.waitForAnimations();
-
-            this.applyGravity();
-            await this.waitForAnimations();
-        }
-
-        this.saveState();
-
-        if (!this.hasValidMoves()) {
-            this.showGameOver();
-        } else {
-            this.isBusy = false;
-        }
-    }
-
-    expandSpecialEffects() {
-        let additionalMatchesFound = true;
-        while (additionalMatchesFound) {
-            additionalMatchesFound = false;
-            for (let x = 0; x < GRID_SIZE; x++) {
-                for (let y = 0; y < GRID_SIZE; y++) {
-                    const tile = this.board[x][y];
-                    if (tile && tile.isMatched) {
-                        if (tile.special === SPECIAL_LINE) {
-                            for (let i = 0; i < GRID_SIZE; i++) {
-                                if (this.board[i][y] && !this.board[i][y].isMatched) {
-                                    this.board[i][y].isMatched = true;
-                                    additionalMatchesFound = true;
-                                }
-                                if (this.board[x][i] && !this.board[x][i].isMatched) {
-                                    this.board[x][i].isMatched = true;
-                                    additionalMatchesFound = true;
-                                }
-                            }
-                        } else if (tile.special === SPECIAL_BOMB) {
-                            for (let dx = -1; dx <= 1; dx++) {
-                                for (let dy = -1; dy <= 1; dy++) {
-                                    const nx = x + dx;
-                                    const ny = y + dy;
-                                    if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
-                                        if (this.board[nx][ny] && !this.board[nx][ny].isMatched) {
-                                            this.board[nx][ny].isMatched = true;
-                                            additionalMatchesFound = true;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    detectSpecialFormations(gridMatched) {
-        const newSpecials = [];
-        for (let y = 0; y < GRID_SIZE; y++) {
-            let run = 0;
-            let startX = 0;
-            for (let x = 0; x < GRID_SIZE; x++) {
-                if (gridMatched[x][y]) {
-                    if (run === 0) startX = x;
-                    run++;
-                } else {
-                    if (run >= 4) {
-                        const midX = startX + Math.floor(run / 2);
-                        newSpecials.push({ x: midX, y, special: run >= 5 ? SPECIAL_COLORBOMB : SPECIAL_LINE });
-                    }
-                    run = 0;
-                }
-            }
-            if (run >= 4) {
-                const midX = startX + Math.floor(run / 2);
-                newSpecials.push({ x: midX, y, special: run >= 5 ? SPECIAL_COLORBOMB : SPECIAL_LINE });
-            }
-        }
-
-        for (let x = 0; x < GRID_SIZE; x++) {
-            let run = 0;
-            let startY = 0;
-            for (let y = 0; y < GRID_SIZE; y++) {
-                if (gridMatched[x][y]) {
-                    if (run === 0) startY = y;
-                    run++;
-                } else {
-                    if (run >= 4) {
-                        const midY = startY + Math.floor(run / 2);
-                        newSpecials.push({ x, y: midY, special: run >= 5 ? SPECIAL_COLORBOMB : SPECIAL_LINE });
-                    }
-                    run = 0;
-                }
-            }
-            if (run >= 4) {
-                const midY = startY + Math.floor(run / 2);
-                newSpecials.push({ x, y: midY, special: run >= 5 ? SPECIAL_COLORBOMB : SPECIAL_LINE });
-            }
-        }
-        return newSpecials;
-    }
-
-    applyGravity() {
-        for (let x = 0; x < GRID_SIZE; x++) {
-            let emptySpacesBelow = 0;
-            for (let y = GRID_SIZE - 1; y >= 0; y--) {
-                if (this.board[x][y] === null) {
-                    emptySpacesBelow++;
-                } else if (emptySpacesBelow > 0) {
-                    const tile = this.board[x][y];
-                    this.board[x][y + emptySpacesBelow] = tile;
-                    tile.gridY = y + emptySpacesBelow;
-                    this.board[x][y] = null;
-                }
-            }
-
-            for (let i = 0; i < emptySpacesBelow; i++) {
-                const targetY = emptySpacesBelow - 1 - i;
-                const type = Math.floor(Math.random() * TILE_TYPES);
-                const tile = new Tile(type, x, targetY);
-                tile.renderY = -((i + 1) * CELL_SIZE);
-                this.board[x][targetY] = tile;
-            }
-        }
-    }
-
-    hasValidMoves() {
-        for (let x = 0; x < GRID_SIZE; x++) {
-            for (let y = 0; y < GRID_SIZE; y++) {
-                if (x < GRID_SIZE - 1 && this.checkVirtualSwap(x, y, x + 1, y)) return true;
-                if (y < GRID_SIZE - 1 && this.checkVirtualSwap(x, y, x, y + 1)) return true;
-            }
-        }
-        return false;
-    }
-
-    checkVirtualSwap(x1, y1, x2, y2) {
-        if (this.board[x1][y1]?.special === SPECIAL_COLORBOMB || this.board[x2][y2]?.special === SPECIAL_COLORBOMB) return true;
-
-        const temp = this.board[x1][y1];
-        this.board[x1][y1] = this.board[x2][y2];
-        this.board[x2][y2] = temp;
-
-        const hasMatch = this.findMatches().matches.length > 0;
-
-        this.board[x2][y2] = this.board[x1][y1];
-        this.board[x1][y1] = temp;
-
-        return hasMatch;
-    }
-
-    updateScore(amount) {
-        this.score += amount;
-        this.scoreEl.textContent = this.score.toLocaleString();
-    }
-
-    showGameOver() {
-        localStorage.removeItem('m3_saved_board');
-        localStorage.removeItem('m3_saved_score');
-        this.overlay.classList.add('active');
-    }
-
-    saveState() {
-        const serializedBoard = this.board.map(col => 
-            col.map(tile => tile ? { type: tile.type, special: tile.special } : null)
-        );
-        localStorage.setItem('m3_saved_board', JSON.stringify(serializedBoard));
-        localStorage.setItem('m3_saved_score', this.score.toString());
-    }
-
-    loadStateOrNew() {
-        const savedBoard = localStorage.getItem('m3_saved_board');
-        const savedScore = localStorage.getItem('m3_saved_score');
-
-        if (savedBoard && savedScore !== null) {
-            try {
-                const parsed = JSON.parse(savedBoard);
-                for (let x = 0; x < GRID_SIZE; x++) {
-                    for (let y = 0; y < GRID_SIZE; y++) {
-                        if (parsed[x][y]) {
-                            this.board[x][y] = new Tile(parsed[x][y].type, x, y, parsed[x][y].special);
-                        }
-                    }
-                }
-                this.score = parseInt(savedScore, 10);
-                this.updateScore(0);
-                return;
-            } catch (e) {
-                console.error("Could not load saved state", e);
-            }
-        }
-        this.startNewGame();
-    }
-
-    waitForAnimations() {
-        return new Promise(resolve => {
-            const check = () => {
-                let animating = false;
-                for (let x = 0; x < GRID_SIZE; x++) {
-                    for (let y = 0; y < GRID_SIZE; y++) {
-                        if (this.board[x][y] && this.board[x][y].isAnimating()) {
-                            animating = true;
-                            break;
-                        }
-                    }
-                }
-                if (!animating && this.particles.length === 0 && this.rings.length === 0) resolve();
-                else requestAnimationFrame(check);
-            };
-            check();
-        });
-    }
-
-    render() {
-        this.ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-
-        this.ctx.strokeStyle = '#22222b';
-        this.ctx.lineWidth = 2;
-        for (let i = 0; i <= GRID_SIZE; i++) {
-            this.ctx.beginPath();
-            this.ctx.moveTo(i * CELL_SIZE, 0);
-            this.ctx.lineTo(i * CELL_SIZE, CANVAS_SIZE);
-            this.ctx.stroke();
-
-            this.ctx.beginPath();
-            this.ctx.moveTo(0, i * CELL_SIZE);
-            this.ctx.lineTo(CANVAS_SIZE, i * CELL_SIZE);
-            this.ctx.stroke();
-        }
-
-        const onLandCallback = (gx, gy, color) => {
-            // SOUND: Drop impact
-            soundFx.playDropImpact();
-
-            const cx = (gx + 0.5) * CELL_SIZE;
-            const cy = (gy + 0.9) * CELL_SIZE;
-            this.rings.push(new ExpansionRing(cx, cy, color, 25, true));
-        };
-
-        for (let x = 0; x < GRID_SIZE; x++) {
-            for (let y = 0; y < GRID_SIZE; y++) {
-                const tile = this.board[x][y];
-                if (tile) {
-                    tile.update(onLandCallback);
-                    this.drawTile(tile);
-                }
-            }
-        }
-
-        this.updateAndDrawEffects();
-    }
-
-    updateAndDrawEffects() {
-        for (let i = this.particles.length - 1; i >= 0; i--) {
-            const p = this.particles[i];
-            p.update();
-            p.draw(this.ctx);
-            if (p.life <= 0) this.particles.splice(i, 1);
-        }
-
-        for (let i = this.rings.length - 1; i >= 0; i--) {
-            const r = this.rings[i];
-            r.update();
-            r.draw(this.ctx);
-            if (r.life <= 0) this.rings.splice(i, 1);
-        }
-    }
-
-    drawTile(tile) {
-        const padding = 6;
-        const radius = 10;
-        const size = CELL_SIZE - padding * 2;
-        const rx = tile.renderX + padding + tile.shakeOffsetX;
-        const ry = tile.renderY + padding;
-
-        this.ctx.save();
-
-        this.ctx.fillStyle = COLORS[tile.type];
-        this.ctx.beginPath();
-        this.ctx.roundRect(rx, ry, size, size, radius);
-        this.ctx.fill();
-
-        if (tile.shakeTimer > 0) {
-            this.ctx.strokeStyle = '#ff2e63';
-            this.ctx.lineWidth = 3;
-            this.ctx.stroke();
-        }
-
-        if (tile.special === SPECIAL_LINE) {
-            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-            this.ctx.fillRect(rx + size * 0.1, ry + size * 0.4, size * 0.8, size * 0.2);
-        } else if (tile.special === SPECIAL_BOMB) {
-            this.ctx.fillStyle = '#ffffff';
-            this.ctx.beginPath();
-            this.ctx.arc(rx + size / 2, ry + size / 2, size * 0.25, 0, Math.PI * 2);
-            this.ctx.fill();
-        } else if (tile.special === SPECIAL_COLORBOMB) {
-            this.ctx.strokeStyle = '#ffffff';
-            this.ctx.lineWidth = 4;
-            this.ctx.beginPath();
-            this.ctx.arc(rx + size / 2, ry + size / 2, size * 0.3, 0, Math.PI * 2);
-            this.ctx.stroke();
-        }
-
-        this.ctx.restore();
-    }
-
-    loop() {
-        this.render();
-        requestAnimationFrame(() => this.loop());
-    }
-}
-
-window.addEventListener('load', () => {
-    new Match3Game();
-});
-</script>
-<script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js')
-        .then(reg => console.log('Service Worker registered!'))
-        .catch(err => console.error('SW registration failed:', err));
-    });
-  }
-</script>
+        // Start
+        initGrid();
+    </script>
 </body>
 </html>
