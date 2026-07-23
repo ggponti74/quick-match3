@@ -1,4 +1,4 @@
-const CACHE_NAME = 'match3-v16';
+const CACHE_NAME = 'match3-v17';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
