@@ -15,8 +15,8 @@
         }
 
         body {
-            margin: 4;
-            padding: 4;
+            margin: 4px;
+            padding: 4px;
             background-color: var(--bg-color);
             color: var(--text-color);
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -109,7 +109,7 @@
             pointer-events: auto;
         }
 
-        .overlay h2 {
+        .overlay h1 {
             font-size: 2rem;
             color: var(--danger-color);
             margin: 0 0 10px 0;
@@ -132,7 +132,7 @@
     <div class="canvas-wrapper">
         <canvas id="gameCanvas" width="480" height="480"></canvas>
         <div id="game-over-overlay" class="overlay">
-            <h2>NO MORE MOVES!</h2>
+            <h1>NO MORE MOVES!</h1>
             <p>Game Over</p>
             <button id="restart-btn">START NEW GAME</button>
         </div>
